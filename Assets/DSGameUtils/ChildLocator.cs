@@ -1,0 +1,73 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEditor.UIElements;
+#endif
+using UnityEngine;
+
+
+namespace DSGameUtils
+{
+    public class ChildLocator : MonoBehaviour
+    {
+        [SerializeField]
+        private NameChild[] children = new NameChild[0];
+
+        public Transform FindChild(string name)
+        {
+            return GetChild(FindChildIndex(name));
+        }
+        public int FindChildIndex(string name)
+        {
+            for (int i = 0; i < children.Length; i++)
+            {
+                if (children[i].name == name)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+        public Transform GetChild(int index)
+        {
+            if (index < 0 || index >= children.Length) return null;
+            return children[index].transform;
+        }
+
+        [Serializable]
+        private struct NameChild
+        {
+            public string name;
+            public Transform transform;
+        }
+
+#if UNITY_EDITOR
+        [CustomPropertyDrawer(typeof(NameChild), true)]
+        public class NameChildDrawer : PropertyDrawer
+        {
+            public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
+            {
+                EditorGUI.BeginProperty(position, label, property);
+                var nameField = property.FindPropertyRelative("name");
+                EditorGUI.PropertyField(new Rect(position.x, position.y, position.width, position.height - EditorGUIUtility.singleLineHeight), nameField);
+                EditorGUI.BeginChangeCheck();
+                var transformField = property.FindPropertyRelative("transform");
+                EditorGUI.indentLevel++;
+                EditorGUI.PropertyField(new Rect(position.x, position.y + EditorGUIUtility.singleLineHeight, position.width, position.height - EditorGUIUtility.singleLineHeight), transformField);
+                if (EditorGUI.EndChangeCheck() && transformField.objectReferenceValue)
+                {
+                    nameField.stringValue = transformField.objectReferenceValue.name;
+                }
+                EditorGUI.indentLevel--;
+                EditorGUI.EndProperty();
+            }
+            public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
+            {
+                return EditorGUIUtility.singleLineHeight * 2f;
+            }
+        }
+#endif
+    }
+}

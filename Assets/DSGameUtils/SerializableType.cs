@@ -1,0 +1,182 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.UIElements;
+
+namespace DSGameUtils
+{
+    [Serializable]
+    public struct SerializableType
+    {
+        public SerializableType(Type type)
+        {
+            _type = type;
+            _typeName = _type.AssemblyQualifiedName;
+            _lastTypeName = _typeName;
+        }
+        public Type type
+        {
+            get 
+            { 
+                if (_typeName != _lastTypeName)
+                {
+                    _type = Type.GetType(_typeName);
+                    _lastTypeName = _typeName;
+                }
+                return _type;
+            }
+            set
+            {
+                _type = value;
+                if (_type == null)
+                {
+                    _typeName = "";
+                    return;
+                }
+                _typeName = _type.AssemblyQualifiedName;
+            }
+        }
+        private Type _type;
+        public string typeName
+        {
+            get { return _typeName; }
+            set
+            {
+                _typeName = value;
+                if (string.IsNullOrEmpty(value))
+                {
+                    _type = null;
+                    return;
+                }
+                _type = Type.GetType(_typeName);
+            }
+        }
+        [SerializeField]
+        private string _typeName;
+        private string _lastTypeName;
+
+        public object CreateInstanceOfType()
+        {
+            return Activator.CreateInstance(type);
+        }
+
+        public T CreateInstanceOfType<T>()
+        {
+            return (T)Activator.CreateInstance(type);
+        }
+
+
+        public static implicit operator Type(SerializableType x) => x.type;
+
+        public static implicit operator SerializableType(Type x) => new SerializableType(x);
+
+        [AttributeUsage(AttributeTargets.Field | AttributeTargets.Parameter, AllowMultiple = false, Inherited = true)]
+        public class RequiredTypeAttribute : Attribute
+        {
+            public Type requiredType;
+
+            public string namespaceOverride;
+
+            public RequiredTypeAttribute(Type type)
+            {
+                requiredType = type;
+            }
+            public RequiredTypeAttribute(Type type, string namespaceOverride)
+            {
+                requiredType = type;
+                this.namespaceOverride = namespaceOverride;
+            }
+        }
+    }
+#if UNITY_EDITOR
+    [CustomPropertyDrawer(typeof(SerializableType), true)]
+    public class SerializableTypeDrawer : PropertyDrawer
+    {
+        string typeName = "";
+        SerializedProperty typeNameProperty;
+        string defaultNamespace = "";
+        GUIStyle buttonStyle;
+        bool init;
+        const float BUTTON_WIDTH = 0.2f;
+        SerializableType.RequiredTypeAttribute requiredTypeAttribute;
+
+        public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
+        {
+            EditorGUI.BeginProperty(position, label, property);
+            EditorGUI.BeginChangeCheck();
+            typeNameProperty = property.FindPropertyRelative("_typeName");
+            if (!init)
+            {
+                buttonStyle = new GUIStyle(GUI.skin.button);
+                Attribute attribute = fieldInfo.GetCustomAttribute(typeof(SerializableType.RequiredTypeAttribute));
+                if (attribute != null) requiredTypeAttribute = (SerializableType.RequiredTypeAttribute)attribute;
+                if (requiredTypeAttribute != null && !string.IsNullOrEmpty(requiredTypeAttribute.namespaceOverride)) defaultNamespace = requiredTypeAttribute.namespaceOverride;
+                int namespaceLength = string.IsNullOrEmpty(defaultNamespace) ? 0 : defaultNamespace.Length + 1;
+                typeName = string.IsNullOrEmpty(typeNameProperty.stringValue) ? "" : typeNameProperty.stringValue.Substring(namespaceLength, typeNameProperty.stringValue.IndexOf(", ") - namespaceLength);
+            }
+            init = true;
+            Rect typeNameRect = new Rect(position.x, position.y, position.width * (1 - BUTTON_WIDTH), position.height - EditorGUIUtility.singleLineHeight);
+            typeName = EditorGUI.DelayedTextField(typeNameRect, label, typeName);
+
+            EditorGUI.indentLevel = 1;
+            Rect namespaceRect = new Rect(position.x, position.y + EditorGUIUtility.singleLineHeight, position.width, position.height - EditorGUIUtility.singleLineHeight);
+            defaultNamespace = EditorGUI.DelayedTextField(namespaceRect, "Namespace", defaultNamespace);
+            EditorGUI.indentLevel = 0;
+
+            bool update = false;
+            if (typeNameRect.Contains(Event.current.mousePosition) || namespaceRect.Contains(Event.current.mousePosition))
+            {
+                switch (Event.current.type)
+                {
+                    case EventType.DragUpdated:
+                        DragAndDrop.visualMode = DragAndDrop.objectReferences[0] && DragAndDrop.objectReferences[0] is MonoScript ? DragAndDropVisualMode.Link : DragAndDropVisualMode.Rejected;
+                        Event.current.Use();
+                        break;
+                    case EventType.DragPerform:
+                        DragAndDrop.AcceptDrag();
+                        if (DragAndDrop.objectReferences[0] && DragAndDrop.objectReferences[0] is MonoScript script)
+                        {
+                            typeName = script.GetClass().FullName;
+                            if (defaultNamespace.Length > 0 && typeName.StartsWith(defaultNamespace))
+                            {
+                                typeName = typeName.Remove(0, defaultNamespace.Length + 1);
+                            }
+                            else
+                            {
+                                defaultNamespace = "";
+                            }
+                            update = true;
+                        }
+                        break;
+                }
+            }
+            update = update || EditorGUI.EndChangeCheck();
+            update = update || GUI.Button(new Rect(position.x + (position.width * (1 - BUTTON_WIDTH)), position.y, position.width * BUTTON_WIDTH, position.height - EditorGUIUtility.singleLineHeight), "Validate", buttonStyle);
+
+            if (update)
+            {
+                Type type = Type.GetType(defaultNamespace + (defaultNamespace.Length > 0 ? "." : "") + typeName);
+                if (type != null && (requiredTypeAttribute == null || requiredTypeAttribute.requiredType.IsAssignableFrom(type)))
+                {
+                    typeNameProperty.stringValue = type.AssemblyQualifiedName;
+                    buttonStyle.normal.textColor = Color.green;
+                    buttonStyle.hover.textColor = Color.green;
+                }
+                else
+                {
+                    buttonStyle.normal.textColor = Color.red;
+                    buttonStyle.hover.textColor = Color.red;
+                }
+            }
+            EditorGUI.EndProperty();
+        }
+        public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
+        {
+            return EditorGUIUtility.singleLineHeight * 2f;
+        }
+    }
+#endif
+}
